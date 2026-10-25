@@ -1,127 +1,44 @@
 import { useEffect, useState } from "react";
-import {
-  AlertTriangle, ArrowLeft, Camera, CheckCircle2, ChevronRight, CircleHelp,
-  Eye, Home, Info, Mic, Pause, Play, Settings as SettingsIcon, ShieldAlert,
-  Smartphone, Square, Volume2, Vibrate, Waves, X, Zap
-} from "lucide-react";
-import SplashScreen from "./components/SplashScreen";
-import PermissionScreen from "./components/PermissionScreen";
-import BottomNavigation from "./components/BottomNavigation";
+import { Info } from "lucide-react";
 import HomeScreen from "./pages/HomeScreen";
 import DetectionScreen from "./pages/DetectionScreen";
 import SettingsScreen from "./pages/SettingsScreen";
 import HelpScreen from "./pages/HelpScreen";
 import EmergencyScreen from "./pages/EmergencyScreen";
+import ReferencePage from "./pages/ReferencePage";
+import BottomNavigation from "./components/BottomNavigation";
 import { useLocalSettings } from "./utils/useLocalSettings";
-import { demoObstacles } from "./services/obstacleDetection";
-import { generateAlert } from "./services/alertService";
 
 const DEFAULT_SETTINGS = {
-  alertMode: "both",
-  voiceEnabled: true,
-  vibrationEnabled: true,
-  speechRate: 1,
-  largeText: true,
-  highContrast: true,
-  reducedMotion: false,
-  hapticFeedback: true,
-  safeDistance: 3,
-  dangerDistance: 1.5,
-  demoMode: true,
-  camera: "environment"
+  alertMode: "both", voiceEnabled: true, vibrationEnabled: true,
+  speechRate: 1, largeText: true, highContrast: true,
+  reducedMotion: false, hapticFeedback: true, safeDistance: 3,
+  dangerDistance: 1.5, demoMode: false, camera: "environment"
 };
-
+const titles = { home: "Home", navigation: "Navigation", detect: "Live Assistance", read: "Read Text", guardian: "Guardian", settings: "Settings", more: "More", help: "About & Help" };
 export default function App() {
   const [settings, setSettings] = useLocalSettings("pathsense-settings", DEFAULT_SETTINGS);
   const [screen, setScreen] = useState("home");
-  const [showSplash, setShowSplash] = useState(true);
-  const [showPermissions, setShowPermissions] = useState(true);
-  const [detection, setDetection] = useState(demoObstacles[0]);
-  const [lastDetection, setLastDetection] = useState(null);
   const [emergencyOpen, setEmergencyOpen] = useState(false);
-  const [prototypeNotice, setPrototypeNotice] = useState(true);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 1800);
-    return () => clearTimeout(timer);
-  }, []);
-
+  const [detection, setDetection] = useState(null);
   useEffect(() => {
     document.documentElement.classList.toggle("large-text", settings.largeText);
     document.documentElement.classList.toggle("high-contrast", settings.highContrast);
     document.documentElement.classList.toggle("reduced-motion", settings.reducedMotion);
   }, [settings]);
-
-  const selectObstacle = (obstacle, announce = true) => {
-    setDetection(obstacle);
-    setLastDetection(obstacle);
-    if (announce) generateAlert(obstacle, settings);
-  };
-
-  const openDetection = () => {
-    setScreen("detect");
-  };
-
-  if (showSplash) return <SplashScreen />;
-
-  if (showPermissions) {
-    return (
-      <PermissionScreen
-        onContinue={() => setShowPermissions(false)}
-        onCamera={openDetection}
-      />
-    );
-  }
-
-  const isMain = ["home", "detect", "settings"].includes(screen);
-
-  return (
-    <div className="app-shell">
-      {prototypeNotice && (
-        <div className="prototype-banner" role="status">
-          <Info size={17} />
-          <span><strong>Prototype / Demo Mode:</strong> obstacle detection is simulated.</span>
-          <button aria-label="Dismiss prototype notice" onClick={() => setPrototypeNotice(false)}><X size={18}/></button>
-        </div>
-      )}
-
-      <main className="page">
-        {screen === "home" && (
-          <HomeScreen
-            settings={settings}
-            detection={lastDetection || detection}
-            onStart={openDetection}
-            onSettings={() => setScreen("settings")}
-            onHelp={() => setScreen("help")}
-            onEmergency={() => setEmergencyOpen(true)}
-          />
-        )}
-
-        {screen === "detect" && (
-          <DetectionScreen
-            settings={settings}
-            detection={detection}
-            onDetection={selectObstacle}
-            onStop={() => setScreen("home")}
-            onBack={() => setScreen("home")}
-            onSettings={() => setScreen("settings")}
-          />
-        )}
-
-        {screen === "settings" && (
-          <SettingsScreen settings={settings} setSettings={setSettings} onBack={() => setScreen("home")} />
-        )}
-
-        {screen === "help" && <HelpScreen onBack={() => setScreen("home")} />}
-      </main>
-
-      {isMain && (
-        <BottomNavigation current={screen} onNavigate={setScreen} onEmergency={() => setEmergencyOpen(true)} />
-      )}
-
-      {emergencyOpen && (
-        <EmergencyScreen onClose={() => setEmergencyOpen(false)} />
-      )}
-    </div>
-  );
+  const go = id => { if (id === "sos") setEmergencyOpen(true); else setScreen(id); };
+  const navCurrent = ["home","navigation","read"].includes(screen) ? screen : "more";
+  return <div className="app-shell ss-app">
+    <header className="ss-top"><button className="ss-brand" onClick={()=>go("home")}>● PathSense</button><div><strong>{titles[screen] || "PathSense"}</strong><small>Your personal walking assistant</small></div></header>
+    <main className="ss-main">
+      {screen === "home" && <HomeScreen onNavigate={go} onStart={()=>go("detect")} onEmergency={()=>setEmergencyOpen(true)}/>}
+      {screen === "detect" && <div className="ss-detect-wrap"><DetectionScreen settings={settings} detection={detection} onDetection={setDetection} onBack={()=>go("home")} onSettings={()=>go("settings")}/></div>}
+      {screen === "settings" && <div className="ss-wrap"><SettingsScreen settings={settings} setSettings={setSettings} onBack={()=>go("more")}/></div>}
+      {screen === "help" && <div className="ss-wrap"><HelpScreen onBack={()=>go("more")}/></div>}
+      {["navigation","read","guardian","more"].includes(screen) && <ReferencePage screen={screen} onNavigate={go} onEmergency={()=>setEmergencyOpen(true)}/>}
+      <div className="ss-warning"><Info size={17}/><span>Experimental object recognition. Distance and route safety are not determined. Continue using established mobility aids.</span></div>
+    </main>
+    <BottomNavigation current={navCurrent} onNavigate={go}/>
+    {emergencyOpen && <EmergencyScreen onClose={()=>setEmergencyOpen(false)}/>}
+  </div>;
 }

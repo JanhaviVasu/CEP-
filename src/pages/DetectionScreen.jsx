@@ -1,40 +1,33 @@
-import { ArrowLeft, Pause, Settings2, Square } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { ArrowLeft, Settings2, Square, Play } from "lucide-react";
 import CameraView from "../components/CameraView";
-import StatusCard from "../components/StatusCard";
-import DemoControls from "../components/DemoControls";
-import { demoObstacles, getNextObstacle } from "../services/obstacleDetection";
-import { useEffect, useState } from "react";
-
-export default function DetectionScreen({ settings, detection, onDetection, onStop, onBack, onSettings }) {
+import { generateAlert } from "../services/alertService";
+export default function DetectionScreen({ settings, onDetection, onBack, onSettings }) {
   const [running, setRunning] = useState(true);
-
-  useEffect(() => {
-    if (!running || !settings.demoMode) return;
-    const timer = setInterval(() => onDetection(getNextObstacle(detection), false), 5000);
-    return () => clearInterval(timer);
-  }, [running, settings.demoMode, detection, onDetection]);
-
-  return (
-    <div className="detection-page">
-      <header className="detection-top">
-        <button className="round-control" onClick={onBack} aria-label="Go back"><ArrowLeft/></button>
-        <div><strong>LIVE DETECTION</strong><span className="scanning"><i/> SCANNING</span></div>
-        <button className="round-control" onClick={onSettings} aria-label="Open detection settings"><Settings2/></button>
-      </header>
-
-      <CameraView obstacle={detection} facingMode={settings.camera}/>
-      <div className="detection-content">
-        <div className="direction-strip" aria-label={`Obstacle direction: ${detection.direction}`}>
-          {["Left", "Center", "Right"].map(d => <div key={d} className={detection.direction === d ? "selected" : ""}><span>{d === "Left" ? "←" : d === "Right" ? "→" : "↑"}</span><small>{d.toUpperCase()}</small></div>)}
-        </div>
-
-        <StatusCard obstacle={detection}/>
-
-        {settings.demoMode && <DemoControls onSelect={onDetection}/>}
-        <button className={`stop-button ${running ? "" : "paused"}`} onClick={() => setRunning(!running)}>
-          {running ? <><Square size={19} fill="currentColor"/> STOP DETECTION</> : <><Pause size={20}/> PAUSED — TAP TO RESUME</>}
-        </button>
-      </div>
+  const [objects, setObjects] = useState([]);
+  const lastAnnouncement = useRef(0);
+  const onResults = useCallback(results => {
+    setObjects(results);
+    if (!results.length) return;
+    const primary = [...results].sort((a,b)=>b.confidence-a.confidence)[0];
+    onDetection?.(primary, false);
+    if (Date.now()-lastAnnouncement.current > 7000) {
+      generateAlert(primary, settings);
+      lastAnnouncement.current = Date.now();
+    }
+  }, [onDetection, settings]);
+  return <div className="detection-page">
+    <header className="detection-top">
+      <button className="round-control" onClick={onBack} aria-label="Back"><ArrowLeft/></button>
+      <div><strong>LIVE ASSISTANCE</strong><span className="scanning">REAL CAMERA RECOGNITION</span></div>
+      <button className="round-control" onClick={onSettings} aria-label="Settings"><Settings2/></button>
+    </header>
+    <CameraView facingMode={settings.camera} running={running} onResults={onResults}/>
+    <div className="detection-content">
+      <div className="real-info" role="status">Objects shown below are recognized from your camera. <strong>Distance and safe walking routes are NOT determined.</strong> An empty result does not mean the path is clear.</div>
+      <h2 className="real-section-title">Recognized objects ({objects.length})</h2>
+      {objects.length ? <div className="real-object-list">{objects.map((o,i)=><div className="real-object-item" key={`${o.type}-${i}`}><strong>{o.type}</strong><span>{o.direction} · {Math.round(o.confidence*100)}% confidence</span></div>)}</div> : <p className="real-empty">No supported objects recognized in this frame. Keep using normal mobility aids.</p>}
+      <button className="stop-button" onClick={()=>setRunning(r=>!r)}>{running ? <><Square size={18}/> PAUSE RECOGNITION</> : <><Play size={18}/> RESUME RECOGNITION</>}</button>
     </div>
-  );
+  </div>;
 }

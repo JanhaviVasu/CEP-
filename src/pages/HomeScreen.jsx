@@ -1,44 +1,23 @@
-import { CircleHelp, ShieldAlert, Volume2, Vibrate } from "lucide-react";
+import { Mic, Navigation, ScanEye, ScanText, Users, PhoneCall, ChevronRight } from "lucide-react";
 
-export default function HomeScreen({ settings, detection, onStart, onSettings, onHelp, onEmergency }) {
-  return (
-    <div className="home-page">
-      <header className="topbar">
-        <div className="brand"><div className="mini-logo">PS</div><div><strong>PathSense</strong><small>● Ready to assist</small></div></div>
-        <button className="icon-button" onClick={onSettings} aria-label="Open settings">⚙</button>
-      </header>
-
-      <section className="welcome-card">
-        <div className="eyebrow">SMART ASSISTANCE</div>
-        <h1>Ready to scan<br/>your path?</h1>
-        <p>Point your phone forward and let PathSense guide your next step.</p>
-        <button className="start-orb" onClick={onStart} aria-label="Start detection">
-          <span><span className="play-mark">▶</span></span>
-          <strong>START</strong><small>DETECTION</small>
-        </button>
-      </section>
-
-      <section className="quick-alert">
-        <div><span className="eyebrow">ALERT MODE</span><strong><Volume2 size={18}/> Voice + <Vibrate size={18}/> Vibration</strong></div>
-        <button onClick={onSettings} aria-label="Change alert mode">Change</button>
-      </section>
-
-      <section>
-        <div className="section-title"><span>LAST DETECTION</span></div>
-        <div className="last-card">
-          <div className={`last-icon ${detection.danger}`}><ShieldAlert size={23}/></div>
-          <div><strong>{detection.type === "Path Clear" ? "Path clear" : `${detection.type} detected`}</strong><span>{detection.danger === "safe" ? "No immediate obstacle" : `${detection.distance.toFixed(1)} m • ${detection.direction}`}</span></div>
-          <span className={`risk-pill ${detection.danger}`}>{detection.danger.toUpperCase()}</span>
-        </div>
-      </section>
-
-      <section className="quick-actions">
-        <div className="section-title"><span>QUICK ACTIONS</span></div>
-        <div className="action-grid">
-          <button onClick={onHelp}><CircleHelp/><span>Help</span></button>
-          <button className="emergency-action" onClick={onEmergency}><ShieldAlert/><span>Emergency</span></button>
-        </div>
-      </section>
-    </div>
-  );
+export default function HomeScreen({ onNavigate, onStart, onEmergency }) {
+  const items = [
+    ["navigation", "Navigation", "Find a walking route", Navigation],
+    ["detect", "Live Assistance", "Recognize objects using your camera", ScanEye],
+    ["read", "Read Text", "Scan signs and listen", ScanText],
+    ["guardian", "Guardian", "Manage trusted contacts", Users],
+  ];
+  return <section className="ss-wrap ss-home">
+    <h1>Hello! Ready when you are.</h1>
+    <p className="ss-muted">Speak or type your destination to begin.</p>
+    <button className="ss-tile" onClick={() => onNavigate("navigation")}>
+      <span className="ss-icon"><Mic /></span><span className="ss-tile-copy"><strong>Speak your destination</strong><small>Voice input or typed address</small></span><ChevronRight size={19}/>
+    </button>
+    <h2 className="ss-section-title">Quick access</h2>
+    {items.map(([id, title, sub, Icon]) => <button key={id} className="ss-tile" onClick={() => id === "detect" ? onStart() : onNavigate(id)}>
+      <span className="ss-icon"><Icon /></span><span className="ss-tile-copy"><strong>{title}</strong><small>{sub}</small></span><ChevronRight size={19}/>
+    </button>)}
+    <button className="ss-tile" onClick={onEmergency}><span className="ss-icon ss-coral"><PhoneCall /></span><span className="ss-tile-copy"><strong>Emergency SOS</strong><small>Get help when you need it</small></span><ChevronRight size={19}/></button>
+    <p className="ss-footnote">Prototype: AI recognition is experimental and does not establish a safe walking path or measure distance.</p>
+  </section>;
 }
