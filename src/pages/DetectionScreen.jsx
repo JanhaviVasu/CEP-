@@ -6,10 +6,18 @@ export default function DetectionScreen({ settings, onDetection, onBack, onSetti
   const [running, setRunning] = useState(true);
   const [objects, setObjects] = useState([]);
   const lastAnnouncement = useRef(0);
+  const stableHistory = useRef(new Map());
   const onResults = useCallback(results => {
     setObjects(results);
-    if (!results.length) return;
-    const primary = [...results].sort((a,b)=>b.confidence-a.confidence)[0];
+    // Speak only classes observed in consecutive scans, reducing transient false alerts.
+    const current = new Set(results.map(r => `${r.type}:${r.direction}`));
+    for (const key of stableHistory.current.keys()) {
+      if (!current.has(key)) stableHistory.current.delete(key);
+    }
+    for (const key of current) stableHistory.current.set(key, Math.min(3,(stableHistory.current.get(key)||0)+1));
+    const stable = results.filter(r => (stableHistory.current.get(`${r.type}:${r.direction}`)||0)>=2);
+    if (!stable.length) return;
+    const primary = [...stable].sort((a,b)=>b.confidence-a.confidence)[0];
     onDetection?.(primary, false);
     if (Date.now()-lastAnnouncement.current > 7000) {
       generateAlert(primary, settings);
