@@ -1,0 +1,18 @@
+.exact-design-app{box-sizing:border-box;min-height:100vh;background:linear-gradient(135deg,#eaf8f5,#f9fffe);font-family:Arial,Helvetica,sans-serif;color:#173451;padding:24px 16px 38px}
+.exact-design-app *{box-sizing:border-box}
+.exact-page{max-width:1120px;margin:auto}
+.exact-page-label{display:flex;align-items:center;gap:15px;margin-bottom:16px}
+.exact-page-label span{background:#20a78f;color:#fff;border-radius:30px;padding:8px 12px;font-size:12px;font-weight:700}
+.exact-page-label h1{font-size:clamp(20px,3vw,30px);margin:0;color:#173451}
+.exact-image{display:block;width:100%;height:auto;max-height:calc(100svh - 240px);min-height:250px;object-fit:contain;border-radius:18px;box-shadow:0 12px 40px #17345120;background:#fff}
+.exact-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+.exact-action,.exact-pagination button{background:#1da68e;color:#fff;border:0;border-radius:100px;padding:12px 18px;font-size:14px;font-weight:700;cursor:pointer}
+.exact-action:hover,.exact-pagination button:hover:not(:disabled){background:#137c6a}
+.exact-pagination{display:flex;justify-content:space-between;gap:12px;margin-top:16px}
+.exact-pagination button:disabled{opacity:.35;cursor:not-allowed}
+.exact-dots{display:flex;justify-content:center;gap:9px;margin:16px 0}
+.exact-dots button{border:0;width:12px;height:12px;border-radius:50%;background:#b9d9d4;cursor:pointer}
+.exact-dots button.active{background:#173451}
+.exact-note{font-size:12px;text-align:center;color:#536b7a}
+.exact-design-app button:focus-visible{outline:3px solid #173451;outline-offset:3px}
+@media(max-width:600px){.exact-design-app{padding:16px 10px 28px}.exact-image{min-height:0;max-height:65svh}.exact-page-label{gap:8px}.exact-actions{justify-content:center}.exact-pagination button{padding:11px 13px}}
