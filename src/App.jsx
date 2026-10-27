@@ -49,6 +49,32 @@ const validPhone=s=>/^\+?\d{7,15}$/.test(s.replace(/[\s()-]/g,""));
 function distanceMeters(a,b){const r=Math.PI/180,p1=a.lat*r,p2=b.lat*r,dp=(b.lat-a.lat)*r,dl=(b.lng-a.lng)*r;const h=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;return Math.round(12742000*Math.asin(Math.sqrt(h)));}
 function bearing(a,b){const rad=Math.PI/180,p1=a.lat*rad,p2=b.lat*rad,dl=(b.lng-a.lng)*rad;return (Math.atan2(Math.sin(dl)*Math.cos(p2),Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl))*180/Math.PI+360)%360;}
 function direction(deg){return ["north","northeast","east","southeast","south","southwest","west","northwest"][Math.round(deg/45)%8]}
+// Project a GPS fix onto a walking-route segment, rather than only checking vertices.
+function routeProgress(position, points) {
+ if (!position || !points?.length) return null;
+ const latScale = 111320, lngScale = 111320 * Math.cos(position.lat * Math.PI / 180);
+ let best = {distance: Infinity, segment: 0, fraction: 0};
+ for (let i = 0; i < points.length - 1; i++) {
+  const a = points[i], b = points[i + 1];
+  const ax = (a[1] - position.lng) * lngScale, ay = (a[0] - position.lat) * latScale;
+  const bx = (b[1] - position.lng) * lngScale, by = (b[0] - position.lat) * latScale;
+  const dx = bx - ax, dy = by - ay;
+  const fraction = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy || 1)));
+  const distance = Math.hypot(ax + fraction * dx, ay + fraction * dy);
+  if (distance < best.distance) best = {distance, segment: i, fraction};
+ }
+ return best;
+}
+function nextRouteStep(route, progress) {
+ if (!route || !progress) return null;
+ const steps = route.steps.filter(step => Array.isArray(step.way_points) && step.way_points.length === 2);
+ const pointIndex = progress.segment + progress.fraction;
+ const index = steps.findIndex(step => step.way_points[1] >= pointIndex);
+ const selected = index < 0 ? steps.length - 1 : index;
+ if (selected < 0) return null;
+ const step = steps[selected], point = route.points[step.way_points[1]];
+ return {step, index: selected, point};
+}
 export default function App(){
  const [screen,setScreen]=useState("home");const [settings,setSettings]=useLocalSettings("pathsense-settings",defaults);
  const [status,setStatus]=useState("");const [location,setLocation]=useState(null);const [target,setTarget]=useState(null);
@@ -61,6 +87,8 @@ export default function App(){
  const [routeBusy,setRouteBusy]=useState(false);
  const [routingKey,setRoutingKey]=useState(()=>localStorage.getItem("pathsense-ors-key")||"");
  const lastReroute=useRef(0);const lastInstruction=useRef(-1);
+ const lastGuidance=useRef({key:"",time:0}); const offRouteFixes=useRef(0);
+ const [guidance,setGuidance]=useState("Choose a Pune destination and calculate a route to begin.");
 const watch=useRef(null);const recognizer=useRef(null);const lastSpeech=useRef(0);
  const navigate=id=>{setScreen(id);setStatus("");window.scrollTo(0,0)};
  const say=(words,force=false)=>{setStatus(words);if((settings.voiceEnabled||force)&&"speechSynthesis" in window){window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(words);u.lang="en-IN";u.rate=Number(settings.speechRate)||1;window.speechSynthesis.speak(u)}};
@@ -87,7 +115,7 @@ const watch=useRef(null);const recognizer=useRef(null);const lastSpeech=useRef(0
      if(!res.ok)throw Error(`Routing service error ${res.status}. Check the API key, network or routing limits.`);
      const data=await res.json();const feature=data.features?.[0];if(!feature?.geometry?.coordinates?.length)throw Error("No walking route was returned.");
      const summary=feature.properties?.summary||{};const steps=(feature.properties?.segments||[]).flatMap(seg=>seg.steps||[]);
-     setRoute({points:feature.geometry.coordinates.map(([lng,lat])=>[lat,lng]),steps,meters:summary.distance||0});lastInstruction.current=-1;
+     setRoute({points:feature.geometry.coordinates.map(([lng,lat])=>[lat,lng]),steps,meters:summary.distance||0});lastInstruction.current=-1;lastGuidance.current={key:"",time:0};offRouteFixes.current=0;
      setStatus(`Walking route loaded: approximately ${Math.round(summary.distance||0)} metres. Follow official crossing guidance and your mobility aids.`);
      if(quiet)say("Updated walking route available. Stop safely and review the next instruction.");
      if(!quiet)say(`Walking route calculated. Approximately ${Math.round(summary.distance||0)} metres. ${steps[0]?.instruction||"Review the route before walking."}`);
@@ -97,7 +125,7 @@ const watch=useRef(null);const recognizer=useRef(null);const lastSpeech=useRef(0
    const steps=route.steps.filter(st=>st.way_points?.length);if(!steps.length){say("No spoken instructions were supplied by the routing service.");return}
    let nearestIndex=0,nearest=Infinity;
    for(let i=0;i<route.points.length;i++){const d=distanceMeters(location,{lat:route.points[i][0],lng:route.points[i][1]});if(d<nearest){nearest=d;nearestIndex=i}}
-   if(nearest>50+location.accuracy){say("You may be away from the planned route. Recalculate the route before continuing.");return}
+   if(nearest>Math.max(35,location.accuracy*2.5)){say("You may be away from the planned route. Recalculate the route before continuing.");return}
    const next=steps.findIndex(st=>st.way_points[1]>=nearestIndex);const index=next<0?steps.length-1:next;
    const st=steps[index];const end=route.points[st.way_points[1]];const meters=end?distanceMeters(location,{lat:end[0],lng:end[1]}):0;
    say(`${st.instruction}. Approximately ${meters} metres to the next instruction. Check your surroundings and crossings.`);
@@ -106,17 +134,49 @@ const watch=useRef(null);const recognizer=useRef(null);const lastSpeech=useRef(0
  const call=()=>{if(!validPhone(contact)){setStatus("Save a valid contact number first.");return}if(window.confirm(`Open phone dialer for ${contact}?`))window.location.href=`tel:${contact.replace(/[\s()-]/g,"")}`};
  const emergencyText=()=>`I need assistance. ${note?note+'. ':''}${location?`My approximate location: https://www.google.com/maps?q=${location.lat},${location.lng} (accuracy about ${Math.round(location.accuracy)} metres).`:"I could not obtain my location."}`;
  const share=async()=>{const message=emergencyText();try{if(navigator.share)await navigator.share({text:message});else if(navigator.clipboard){await navigator.clipboard.writeText(message);setStatus("Message copied. Paste it into SMS and send it.")}else setStatus(message)}catch(e){if(e.name!=="AbortError")setStatus("Could not share. Try SMS or calling.")}};
- useEffect(()=>{if(!tracking||!route||!location||!target)return;
-   const now=Date.now();if(now-lastReroute.current<45000)return;
-   let nearest=Infinity;for(const [lat,lng] of route.points){nearest=Math.min(nearest,distanceMeters(location,{lat,lng}))}
-   if(location.accuracy>60){setStatus("GPS accuracy is too low for reliable route-change guidance. Move to an open area and wait for a better fix.");return}
-   const threshold=Math.max(40,location.accuracy*1.8);
-   if(nearest>threshold){lastReroute.current=now;say("You may have left the planned route. Stop somewhere safe while PathSense attempts to recalculate. Do not change direction based only on this alert.");requestRoute(location,target,true);return}
-   const steps=route.steps.filter(st=>st.way_points?.length);let nearestIndex=0,nearestPoint=Infinity;
-   route.points.forEach(([lat,lng],i)=>{const d=distanceMeters(location,{lat,lng});if(d<nearestPoint){nearestPoint=d;nearestIndex=i}});
-   const idx=steps.findIndex(st=>st.way_points[1]>=nearestIndex);const next=idx<0?steps.length-1:idx;
-   if(next>=0&&next!==lastInstruction.current){lastInstruction.current=next;const st=steps[next];say(`${st.instruction}. Confirm road crossings and obstacles independently.`)}
- },[location,tracking,route,target]);
+ useEffect(()=>{
+   if(!tracking||!route||!location||!target)return;
+   const now=Date.now();
+   if(!Number.isFinite(location.accuracy)||location.accuracy>35){
+     setGuidance(`GPS accuracy is about ${Math.round(location.accuracy||0)} metres. Wait for a better signal before following instructions.`);
+     return;
+   }
+   const progress=routeProgress(location,route.points);
+   if(!progress)return;
+   const offRouteThreshold=Math.max(35,location.accuracy*2.5);
+   if(progress.distance>offRouteThreshold){
+     offRouteFixes.current+=1;
+     setGuidance("You may be off the route. Stop somewhere safe while your position is checked.");
+     if(offRouteFixes.current>=3&&now-lastReroute.current>60000&&!routeBusy){
+       lastReroute.current=now;offRouteFixes.current=0;
+       say("You may have left the walking route. Stop somewhere safe. Recalculating directions.");
+       requestRoute(location,target,true);
+     }
+     return;
+   }
+   offRouteFixes.current=0;
+   const destinationDistance=distanceMeters(location,target);
+   if(destinationDistance<=Math.max(15,location.accuracy)){
+     const message="You may be near your destination. Verify the entrance and your surroundings.";
+     setGuidance(message);
+     if(lastGuidance.current.key!=="arrival"){
+       lastGuidance.current={key:"arrival",time:now};say(message);
+     }
+     return;
+   }
+   const next=nextRouteStep(route,progress);
+   if(!next)return;
+   const distance=Math.round(distanceMeters(location,{lat:next.point[0],lng:next.point[1]}));
+   const text=next.step.instruction||"Continue along the mapped walking route";
+   setGuidance(`${text} · approximately ${distance} metres to the next route point. GPS accuracy ±${Math.round(location.accuracy)} m.`);
+   // Announce each new maneuver, then a single approach reminder; avoid speech on every GPS fix.
+   const band=distance<=25?"near":distance<=80?"approach":"far";
+   const key=`${next.index}:${band}`;
+   if(key!==lastGuidance.current.key&&now-lastGuidance.current.time>7000){
+     lastGuidance.current={key,time:now};lastInstruction.current=next.index;
+     say(`${distance<=25?"Approaching instruction. ":""}${text}. Approximately ${distance} metres. Verify crossings and obstacles independently.`);
+   }
+ },[location,tracking,route,target,routeBusy]);
  const choosePunePlace=(name)=>{const p=PUNE_PLACES.find(x=>x.name===name);setPlaceName(name);if(p){setTarget({lat:p.lat,lng:p.lng});setRoute(null);lastInstruction.current=-1;setStatus(`${name} selected in Pune. Tap Calculate Walking Route.`)}};
  const chooseMapPoint=p=>{if(!inPune(p)){setStatus("Only Pune-area destinations are supported. Choose a point within Pune.");return}setPlaceName("");setTarget(p);setRoute(null);lastInstruction.current=-1;setStatus("Pune destination selected. Calculate a walking route to begin guidance.")};
  const sms=()=>{if(!validPhone(contact)){setStatus("Enter a valid trusted contact number first.");return}window.location.href=`sms:${contact.replace(/[\s()-]/g,"")}?body=${encodeURIComponent(emergencyText())}`};
@@ -126,7 +186,7 @@ const watch=useRef(null);const recognizer=useRef(null);const lastSpeech=useRef(0
  {screen==="camera"&&<section><button className="back" onClick={()=>navigate("features")}><ArrowLeft size={18}/> Features</button><h1>Obstacle tracking</h1><p className="intro">Recognizes certain objects. Does not measure distance or identify safe walking paths.</p><DetectionScreen settings={settings} onBack={()=>navigate("features")} onSettings={()=>navigate("settings")}/></section>}
  {screen==="map"&&<section><div className="eyebrow">LOCATION ASSISTANCE</div><h1>Pune navigation</h1><p className="intro">Choose a Pune destination or tap within Pune on the map. Actual GPS location is never replaced with a preset.</p><label className="field-label" htmlFor="pune-place">Pune destination</label><select id="pune-place" value={placeName} onChange={e=>choosePunePlace(e.target.value)}><option value="">Choose a Pune location</option>{PUNE_PLACES.map(p=><option key={p.name} value={p.name}>{p.name}</option>)}</select><div className="map-actions"><button className="solid" onClick={locate}><LocateFixed size={18}/> Find Me</button><button className="outline" onClick={tracking?stopTracking:startTracking}>{tracking?<Square size={18}/>:<Play size={18}/>} {tracking?"Stop GPS":"Track GPS"}</button></div><MapView location={location} target={target} route={route} onTarget={chooseMapPoint}/><div className="info-box" role="status">{location?`Position: ${location.lat.toFixed(5)}, ${location.lng.toFixed(5)} · ±${Math.round(location.accuracy)} m`:"Tap Find Me to request your location."}{target&&location?` · Selected point ~${distanceMeters(location,target)} m away (straight line).`:""}</div><label className="field-label" htmlFor="routingKey">OpenRouteService API key (required for walking routes)</label><input id="routingKey" type="password" autoComplete="off" value={routingKey} onChange={e=>setRoutingKey(e.target.value)} placeholder="Paste your routing API key"/><button className="outline full" onClick={saveRoutingKey}>Save Routing Key</button>
  <button className="solid full" disabled={routeBusy} onClick={()=>requestRoute()}><Navigation size={18}/>{routeBusy?"Calculating…":"Calculate Walking Route"}</button>
- {route&&<div className="route-card"><strong>Walking route: {Math.round(route.meters)} m</strong><p>{route.steps.length} navigation instructions available</p><button className="solid full" onClick={speakRouteStep}><Volume2 size={18}/> Speak Next Route Instruction</button><button className="outline full" onClick={tracking?stopTracking:startTracking}>{tracking?"Stop Live Route Guidance":"Start Live Route Guidance"}</button><ol className="route-steps">{route.steps.map((st,i)=><li key={i}>{st.instruction} ({Math.round(st.distance||0)} m)</li>)}</ol></div>}<button className="outline full" onClick={()=>{setTarget(null);setPlaceName("");setRoute(null);setStatus("Destination cleared.")}}>Clear Destination</button><p className="fine">Map tiles require internet. Walking route instructions are provided by an external routing service only when a valid API key is configured. Routes may be inaccurate or inaccessible; never rely on them for crossing decisions or obstacle avoidance.</p></section>}
+ {route&&<div className="route-card"><div role="status" aria-live="polite" className="info-box"><strong>Live walking guidance</strong><p>{tracking?guidance:"Tap Start Live Route Guidance to hear directions as you move."}</p></div><strong>Walking route: {Math.round(route.meters)} m</strong><p>{route.steps.length} navigation instructions available</p><button className="solid full" onClick={speakRouteStep}><Volume2 size={18}/> Speak Next Route Instruction</button><button className="outline full" onClick={tracking?stopTracking:startTracking}>{tracking?"Stop Live Route Guidance":"Start Live Route Guidance"}</button><ol className="route-steps">{route.steps.map((st,i)=><li key={i}>{st.instruction} ({Math.round(st.distance||0)} m)</li>)}</ol></div>}<button className="outline full" onClick={()=>{setTarget(null);setPlaceName("");setRoute(null);setStatus("Destination cleared.")}}>Clear Destination</button><p className="fine">Map tiles require internet. Walking route instructions are provided by an external routing service only when a valid API key is configured. Routes may be inaccurate or inaccessible; never rely on them for crossing decisions or obstacle avoidance.</p></section>}
  {screen==="voice"&&<section><div className="eyebrow">AUDIO ASSISTANCE</div><h1>Voice assistant</h1><p className="intro">Speak a command or hear location information.</p><div className="voice-orb"><Mic size={48}/><span>{listening?"Listening…":"Ready to listen"}</span></div><button className="solid big" onClick={commands}><Mic size={18}/> {listening?"Listening…":"Start Voice Command"}</button><button className="outline big" onClick={()=>say("PathSense is ready. Say camera, map, location, direction, settings, home or emergency.",true)}><Volume2 size={18}/> Hear Available Commands</button><button className="outline big" onClick={speakRouteStep}><Compass size={18}/> Speak Next Walking Instruction</button><button className="outline big" onClick={()=>{if(navigator.vibrate){navigator.vibrate([180,120,180]);setStatus("Vibration requested.")}else setStatus("Vibration not supported on this device.")}}>Test Vibration</button><p className="fine">Speech recognition support varies by Android browser and may require an internet connection.</p></section>}
  {screen==="settings"&&<section><div className="eyebrow">YOUR PREFERENCES</div><h1>Accessibility settings</h1><div className="settings-frame"><SettingsScreen settings={settings} setSettings={setSettings} onBack={()=>navigate("features")}/></div></section>}
  {screen==="sos"&&<section><div className="eyebrow">EMERGENCY ASSISTANCE · INDIA</div><h1>Emergency SOS</h1><p className="intro">In immediate danger, call India's national emergency number. Calling requires a phone and your confirmation.</p>
